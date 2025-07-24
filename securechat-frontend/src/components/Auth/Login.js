@@ -45,7 +45,7 @@ const Login = () => {
 
 
   return (
-    <div class="page-wrapper">
+    <div className="page-wrapper">
         <div className="login-container">
       <div className="login-header">
         <h1><i className="fas fa-shield-alt"></i> SecureChat</h1>

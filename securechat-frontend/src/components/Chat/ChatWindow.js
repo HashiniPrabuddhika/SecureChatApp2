@@ -51,7 +51,11 @@ export default function ChatApp() {
       username: username || email.split("@")[0],
     });
 
-    const socketClient = io({ auth: { token } });
+    const socketClient = io("http://localhost:5000", {
+      auth: { token },
+      withCredentials: true,
+    });
+
     console.log("🔌 Connecting to socket.io...");
 
     setSocket(socketClient);
@@ -70,6 +74,14 @@ export default function ChatApp() {
       console.log("✅ Socket connected");
       setConnectionStatus("Connected");
       generateKeyPair();
+
+      // Send user info on join
+      socket.emit("join", {
+        userId: localStorage.getItem("userId"), // Ensure you store user ID at login
+        username: localStorage.getItem("username"),
+        hasPublicKey: !!myKeys.publicKey,
+      });
+
       socket.emit("get-online-users");
     });
 
@@ -252,9 +264,6 @@ export default function ChatApp() {
       window.location.href = "/";
     });
   }
-
-
-
 
   return (
     <div
