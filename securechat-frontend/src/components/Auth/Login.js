@@ -31,6 +31,7 @@ const Login = () => {
       localStorage.setItem('authToken', data.token);
       localStorage.setItem('userEmail', data.email);
       localStorage.setItem('username', data.username);
+      localStorage.setItem('userId', data.userId);
       navigate('/chat');
     } else {
       setAlert(data.error || 'Login failed');

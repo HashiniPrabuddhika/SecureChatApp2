@@ -31,14 +31,16 @@ export default function ChatApp() {
   });
   const [messages, setMessages] = useState([]);
   const messageInputRef = useRef(null);
+  const sessionKeys = useRef(new Map());
 
   // Load token & user info from localStorage
   useEffect(() => {
     const token = localStorage.getItem("authToken");
     const email = localStorage.getItem("userEmail");
     const username = localStorage.getItem("username");
+    const userId = localStorage.getItem("userId");
 
-    console.log("🔐 Loaded from localStorage:", { token, email, username });
+    console.log("🔐 Loaded from localStorage:", { token, email, username , userId});
 
     if (!token || !email) {
       console.warn("⚠️ Missing token or email. Redirecting to login...");
@@ -140,6 +142,25 @@ export default function ChatApp() {
       console.log("🔑 Requesting public key for", userId);
       socket.emit("request-public-key", userId);
     }
+
+    // Establish session if missing
+    if (!sessionKeys.current.has(userId)) {
+      const aesKey = CryptoJS.lib.WordArray.random(256 / 8).toString(); // AES key
+      const recipientKey = userKeys.get(userId);
+      if (!recipientKey?.publicKey) return;
+
+      const rsaEncrypt = new JSEncrypt();
+      rsaEncrypt.setPublicKey(recipientKey.publicKey);
+      const encryptedKey = rsaEncrypt.encrypt(aesKey);
+
+      socket.emit("send-session-key", {
+        toUserId: userId,
+        encryptedSessionKey: encryptedKey,
+      });
+
+      sessionKeys.current.set(userId, aesKey); // Store locally
+      console.log("🔐 AES session key created for", userId);
+    }
   }
 
   function sendMessage() {
@@ -153,7 +174,11 @@ export default function ChatApp() {
       return;
     }
 
-    const aesKey = CryptoJS.lib.WordArray.random(256 / 8).toString();
+    const aesKey = sessionKeys.current.get(currentChat);
+    if (!aesKey) {
+      alert("No session key established with this user.");
+      return;
+    }
     const encryptedMessage = CryptoJS.AES.encrypt(message, aesKey).toString();
 
     const rsaEncrypt = new JSEncrypt();
@@ -199,18 +224,17 @@ export default function ChatApp() {
     try {
       const rsaDecrypt = new JSEncrypt();
       rsaDecrypt.setPrivateKey(myKeys.privateKey);
-      const aesKey = rsaDecrypt.decrypt(data.encryptedAESKey);
-
+      const aesKey = sessionKeys.current.get(data.from);
       if (!aesKey) {
-        console.warn("❌ Failed to decrypt AES key");
+        console.warn("No session key found to decrypt message.");
         return;
       }
-
       const decryptedBytes = CryptoJS.AES.decrypt(
         data.encryptedMessage,
         aesKey
       );
       const message = decryptedBytes.toString(CryptoJS.enc.Utf8);
+
       if (!message) {
         console.warn("❌ Failed to decrypt message content");
         return;

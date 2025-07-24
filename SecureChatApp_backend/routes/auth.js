@@ -76,6 +76,7 @@ router.post("/login", async (req, res) => {
       token,
       email: user.email,
       username: user.username,
+      userId:user._id,
     });
   } catch (err) {
     console.error("❌ Login error:", err);
