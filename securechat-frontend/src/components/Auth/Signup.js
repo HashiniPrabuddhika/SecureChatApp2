@@ -65,7 +65,8 @@ const Signup = () => {
     try {
       const data = await signup({ username, email, password });
 
-      if (data && data.success) {
+      // ✅ Adjusted this check based on expected backend response
+      if (data && !data.error) {
         showAlert('Registration successful! Redirecting...', 'success');
         setTimeout(() => window.location.href = '/', 2000);
       } else {
@@ -79,103 +80,102 @@ const Signup = () => {
   };
 
   return (
-    <div class="page-wrapper">
-       <div className="register-container">
-      <div className="register-header">
-        <h1><i className="fas fa-user-plus"></i> Register</h1>
-        <p>Create your secure account</p>
-      </div>
-
-      {alert.message && (
-        <div className={`alert alert-${alert.type}`}>
-          {alert.message}
+    <div className="page-wrapper">
+      <div className="register-container">
+        <div className="register-header">
+          <h1><i className="fas fa-user-plus"></i> Register</h1>
+          <p>Create your secure account</p>
         </div>
-      )}
 
-      <form onSubmit={handleSubmit}>
-        <div className="form-group">
-          <i className="fas fa-user"></i>
-          <input
-            type="text"
-            className="form-control"
-            id="username"
-            placeholder="Username"
-            required
-            value={form.username}
-            onChange={handleInputChange}
-          />
-          <div
-            className={`field-hint ${
-              usernameHint.valid === true
-                ? 'username-valid'
-                : usernameHint.valid === false
-                ? 'username-invalid'
-                : ''
-            }`}
-          >
-            {usernameHint.message}
+        {alert.message && (
+          <div className={`alert alert-${alert.type}`}>
+            {alert.message}
           </div>
+        )}
+
+        <form onSubmit={handleSubmit}>
+          <div className="form-group">
+            <i className="fas fa-user"></i>
+            <input
+              type="text"
+              className="form-control"
+              id="username"
+              placeholder="Username"
+              required
+              value={form.username}
+              onChange={handleInputChange}
+            />
+            <div
+              className={`field-hint ${
+                usernameHint.valid === true
+                  ? 'username-valid'
+                  : usernameHint.valid === false
+                  ? 'username-invalid'
+                  : ''
+              }`}
+            >
+              {usernameHint.message}
+            </div>
+          </div>
+
+          <div className="form-group">
+            <i className="fas fa-envelope"></i>
+            <input
+              type="email"
+              className="form-control"
+              id="email"
+              placeholder="Email Address"
+              required
+              value={form.email}
+              onChange={handleInputChange}
+            />
+          </div>
+
+          <div className="form-group">
+            <i className="fas fa-lock"></i>
+            <input
+              type="password"
+              className="form-control"
+              id="password"
+              placeholder="Password"
+              required
+              value={form.password}
+              onChange={handleInputChange}
+            />
+            <div className="field-hint">Minimum 6 characters</div>
+          </div>
+
+          <div className="form-group">
+            <i className="fas fa-lock"></i>
+            <input
+              type="password"
+              className="form-control"
+              id="confirmPassword"
+              placeholder="Confirm Password"
+              required
+              value={form.confirmPassword}
+              onChange={handleInputChange}
+            />
+          </div>
+
+          <button
+            type="submit"
+            className="btn-register"
+            disabled={isSubmitting}
+          >
+            {isSubmitting ? (
+              <><i className="fas fa-spinner fa-spin"></i> Registering...</>
+            ) : (
+              <><i className="fas fa-user-plus"></i> Register</>
+            )}
+          </button>
+        </form>
+
+        <div className="login-link">
+          Already have an account? <a href="/">Login here</a>
         </div>
-
-        <div className="form-group">
-          <i className="fas fa-envelope"></i>
-          <input
-            type="email"
-            className="form-control"
-            id="email"
-            placeholder="Email Address"
-            required
-            value={form.email}
-            onChange={handleInputChange}
-          />
-        </div>
-
-        <div className="form-group">
-          <i className="fas fa-lock"></i>
-          <input
-            type="password"
-            className="form-control"
-            id="password"
-            placeholder="Password"
-            required
-            value={form.password}
-            onChange={handleInputChange}
-          />
-          <div className="field-hint">Minimum 6 characters</div>
-        </div>
-
-        <div className="form-group">
-          <i className="fas fa-lock"></i>
-          <input
-            type="password"
-            className="form-control"
-            id="confirmPassword"
-            placeholder="Confirm Password"
-            required
-            value={form.confirmPassword}
-            onChange={handleInputChange}
-          />
-        </div>
-
-        <button
-          type="submit"
-          className="btn-register"
-          disabled={isSubmitting}
-        >
-          {isSubmitting ? (
-            <><i className="fas fa-spinner fa-spin"></i> Registering...</>
-          ) : (
-            <><i className="fas fa-user-plus"></i> Register</>
-          )}
-        </button>
-      </form>
-
-      <div className="login-link">
-        Already have an account? <a href="/">Login here</a>
       </div>
     </div>
-    </div>
-   
   );
 };
 
