@@ -17,26 +17,32 @@ const Login = () => {
   }, [navigate]);
 
   const handleSubmit = async (e) => {
-    e.preventDefault();
-    setAlert('');
-    setLoading(true);
+  e.preventDefault();
+  setAlert('');
+  setLoading(true);
 
-    try {
-     const data = await login({ identifier: loginInput, password });
-      if (data.token) {
-        localStorage.setItem('authToken', data.token);
-        localStorage.setItem('userEmail', data.email);
-        localStorage.setItem('username', data.username);
-        navigate('/chat');
-      } else {
-        setAlert(data.error || 'Login failed');
-      }
-    } catch (err) {
-      setAlert('Network error. Please try again.');
-    } finally {
-      setLoading(false);
+  try {
+    const data = await login({ identifier: loginInput, password });
+
+    // ✅ Log the full response from the backend
+    console.log("🔐 Login Response:", data);
+
+    if (data.token) {
+      localStorage.setItem('authToken', data.token);
+      localStorage.setItem('userEmail', data.email);
+      localStorage.setItem('username', data.username);
+      navigate('/chat');
+    } else {
+      setAlert(data.error || 'Login failed');
     }
-  };
+  } catch (err) {
+    console.error("❌ Login Error:", err);
+    setAlert('Network error. Please try again.');
+  } finally {
+    setLoading(false);
+  }
+};
+
 
   return (
     <div class="page-wrapper">

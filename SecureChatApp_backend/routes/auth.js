@@ -72,7 +72,11 @@ router.post("/login", async (req, res) => {
     );
 
     logAuthEvent(user._id, "Login Success", req.ip);
-    res.status(200).json({ token });
+    res.status(200).json({
+      token,
+      email: user.email,
+      username: user.username,
+    });
   } catch (err) {
     console.error("❌ Login error:", err);
     res.status(500).json({ error: "Internal server error" });
