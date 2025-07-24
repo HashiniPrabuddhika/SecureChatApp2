@@ -65,7 +65,8 @@ const Signup = () => {
     try {
       const data = await signup({ username, email, password });
 
-      if (data && data.success) {
+      if (data && data.token) {
+        localStorage.setItem('token', data.token);
         showAlert('Registration successful! Redirecting...', 'success');
         setTimeout(() => window.location.href = '/', 2000);
       } else {
@@ -79,7 +80,7 @@ const Signup = () => {
   };
 
   return (
-    <div class="page-wrapper">
+    <div className="page-wrapper">
        <div className="register-container">
       <div className="register-header">
         <h1><i className="fas fa-user-plus"></i> Register</h1>
