@@ -2,9 +2,11 @@ import React, { useEffect, useState, useRef } from 'react';
 import io from 'socket.io-client';
 import CryptoJS from 'crypto-js';
 import JSEncrypt from 'jsencrypt';
-import '../css/chatwindow.css'; 
-
-import { FaShieldAlt, FaSignOutAlt, FaUserCircle, FaKey, FaLock, FaUnlockAlt, FaComments, FaUser, FaPaperPlane, FaCheckCircle, FaExclamationTriangle } from 'react-icons/fa';
+import { 
+  FaShieldAlt, FaSignOutAlt, FaUserCircle, FaKey, FaLock, FaUnlockAlt,
+  FaComments, FaUser, FaPaperPlane, FaCheckCircle, FaExclamationTriangle, 
+  FaLock as FaLockIcon, FaBell, FaTimes, FaCheck, FaUserPlus, FaHeart
+} from 'react-icons/fa';
 
 export default function ChatApp() {
   const [socket, setSocket] = useState(null);
@@ -14,143 +16,324 @@ export default function ChatApp() {
   const [currentChat, setCurrentChat] = useState(null);
   const [myKeys, setMyKeys] = useState({ privateKey: null, publicKey: null });
   const [currentUserData, setCurrentUserData] = useState({ email: '', username: '' });
-  const [messages, setMessages] = useState([]); // messages for current chat
+  const [messages, setMessages] = useState([]);
+  const [allMessages, setAllMessages] = useState(new Map()); // Store messages per chat
   const messageInputRef = useRef(null);
   const [allUsers, setAllUsers] = useState([]);
 
-useEffect(() => {
-  const storedToken = localStorage.getItem('authToken');
-  const currentEmail = localStorage.getItem('userEmail');
+  // Connection request states
+  const [connectionRequestsSent, setConnectionRequestsSent] = useState(new Set());
+  const [connectionRequestsReceived, setConnectionRequestsReceived] = useState([]);
+  const [connectedWith, setConnectedWith] = useState(new Set());
+  const [showConnectionRequests, setShowConnectionRequests] = useState(false);
+  const [showNotification, setShowNotification] = useState(false);
+  const [notificationMessage, setNotificationMessage] = useState('');
+  const [notificationType, setNotificationType] = useState('success');
 
-  if (!storedToken) return;
+  // Debug logs
+  const [debugLogs, setDebugLogs] = useState([]);
+  
+  const addDebugLog = (message) => {
+    console.log(`[DEBUG] ${message}`);
+    setDebugLogs(prev => [...prev, `${new Date().toLocaleTimeString()}: ${message}`].slice(-10));
+  };
 
-  fetch('http://localhost:5000/api/users', {
-    headers: {
-      Authorization: `Bearer ${storedToken}`,
-    },
-  })
-    .then((res) => {
-      if (!res.ok) throw new Error('Failed to fetch users');
-      return res.json();
+  // Show notification function
+  const showNotificationMessage = (message, type = 'success') => {
+    setNotificationMessage(message);
+    setNotificationType(type);
+    setShowNotification(true);
+    setTimeout(() => setShowNotification(false), 4000);
+  };
+
+  // Helper function to check if chat is fully secure (connected + has keys)
+  const isChatSecure = (userId) => {
+    return connectedWith.has(userId) && userKeys.has(userId);
+  };
+
+  // Fetch all users
+  useEffect(() => {
+    const storedToken = localStorage.getItem('authToken');
+    const currentEmail = localStorage.getItem('userEmail');
+
+    addDebugLog(`Stored token exists: ${!!storedToken}`);
+    addDebugLog(`Current email: ${currentEmail}`);
+
+    if (!storedToken) {
+      addDebugLog('No token found, cannot fetch users');
+      return;
+    }
+
+    fetch('http://localhost:5000/api/users', {
+      headers: {
+        Authorization: `Bearer ${storedToken}`,
+      },
     })
-    .then((data) => {
-      // Remove current user from the list
-      const filtered = data.filter((user) => user.email !== currentEmail);
-      setAllUsers(filtered);
-    })
-    .catch((err) => {
-      console.error('Fetch error:', err);
-    });
-}, []);
+      .then((res) => {
+        addDebugLog(`Users fetch response status: ${res.status}`);
+        if (!res.ok) throw new Error('Failed to fetch users');
+        return res.json();
+      })
+      .then((data) => {
+        const filtered = data.filter((user) => user.email !== currentEmail);
+        addDebugLog(`Fetched ${filtered.length} users`);
+        setAllUsers(filtered);
+      })
+      .catch((err) => {
+        addDebugLog(`Users fetch error: ${err.message}`);
+        console.error('Fetch error:', err);
+      });
+  }, []);
 
-
-  // Load token & user info from localStorage
+  // Initialize socket connection
   useEffect(() => {
     const token = localStorage.getItem('authToken');
     const email = localStorage.getItem('userEmail');
     const username = localStorage.getItem('username');
 
+    addDebugLog(`Initializing socket with token: ${!!token}, email: ${email}`);
+
     if (!token || !email) {
+      addDebugLog('Missing token or email, redirecting to login');
       window.location.href = '/';
       return;
     }
 
-    setCurrentUserData({
-      email,
-      username: username || email.split('@')[0]
+    setCurrentUserData({ email, username });
+
+    addDebugLog('Creating socket connection...');
+    const socketClient = io('http://localhost:5000', {
+      auth: { token },
+      forceNew: true,
+      transports: ['websocket', 'polling']
     });
 
-    // Initialize socket
-    const socketClient = io({
-      auth: { token }
+    // Add connection error handling
+    socketClient.on('connect_error', (error) => {
+      addDebugLog(`Socket connection error: ${error.message}`);
+      setConnectionStatus('Connection Error');
+      showNotificationMessage(`Connection Error: ${error.message}`, 'error');
+    });
+
+    socketClient.on('disconnect', (reason) => {
+      addDebugLog(`Socket disconnected: ${reason}`);
+      setConnectionStatus('Disconnected');
+      showNotificationMessage('Disconnected from server', 'error');
     });
 
     setSocket(socketClient);
 
-    // Cleanup socket on unmount
     return () => {
+      addDebugLog('Cleaning up socket connection');
       socketClient.disconnect();
     };
   }, []);
 
-  // Setup socket events & key generation
+  // Setup socket event listeners
   useEffect(() => {
     if (!socket) return;
 
+    addDebugLog('Setting up socket event listeners');
+
     socket.on('connect', () => {
+      addDebugLog('Socket connected successfully');
       setConnectionStatus('Connected');
+      showNotificationMessage('Connected to SecureChat! 🚀', 'success');
       generateKeyPair();
       socket.emit('get-online-users');
     });
 
     socket.on('disconnect', () => {
+      addDebugLog('Socket disconnected');
       setConnectionStatus('Disconnected');
     });
 
     socket.on('online-users', (users) => {
+      addDebugLog(`Received online users: ${users.length}`);
+      console.log('Online users:', users);
       setOnlineUsers(users);
     });
 
     socket.on('user-key-available', (data) => {
-      setUserKeys(prev => new Map(prev).set(data.userId, data));
+      addDebugLog(`Key available for user: ${data.username}`);
+      setUserKeys((prev) => new Map(prev).set(data.userId, data));
       socket.emit('get-online-users');
     });
 
-    socket.on('receive-public-key', (data) => {
-      setUserKeys(prev => new Map(prev).set(data.userId, data));
-    });
-
     socket.on('receive-message', (data) => {
+      addDebugLog(`Received message from: ${data.fromUsername}`);
       decryptAndDisplayMessage(data);
     });
 
-    socket.on('error', (error) => {
-      console.error('Socket error:', error);
+    // Updated connection request handlers
+    socket.on('connection-request-received', (requestData) => {
+      addDebugLog(`Connection request received from: ${requestData.username} with public key`);
+      
+      // Store the requester's public key immediately
+      setUserKeys((prev) => new Map(prev).set(requestData.userId, {
+        userId: requestData.userId,
+        username: requestData.username,
+        publicKey: requestData.publicKey
+      }));
+      
+      setConnectionRequestsReceived((prev) => {
+        if (prev.find((r) => r.userId === requestData.userId)) return prev;
+        return [...prev, requestData];
+      });
+      showNotificationMessage(`${requestData.username} wants to connect! 📩`, 'info');
     });
 
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [socket]);
+    socket.on('connection-request-accepted', ({ fromUserId, publicKey }) => {
+      addDebugLog(`Connection request accepted by user: ${fromUserId} with public key`);
+      
+      // Store the accepter's public key immediately
+      setUserKeys((prev) => new Map(prev).set(fromUserId, {
+        userId: fromUserId,
+        publicKey: publicKey
+      }));
+      
+      setConnectionRequestsSent((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(fromUserId);
+        return newSet;
+      });
+      setConnectedWith((prev) => new Set(prev).add(fromUserId));
+      const user = allUsers.find(u => u._id === fromUserId);
+      showNotificationMessage(`${user?.username || 'User'} accepted your connection! You can now chat securely! 🎉`, 'success');
+    });
 
-  // Generate RSA key pair
+    socket.on('connection-request-denied', ({ fromUserId }) => {
+      addDebugLog(`Connection request denied by user: ${fromUserId}`);
+      setConnectionRequestsSent((prev) => {
+        const newSet = new Set(prev);
+        newSet.delete(fromUserId);
+        return newSet;
+      });
+      const user = allUsers.find(u => u._id === fromUserId);
+      showNotificationMessage(`${user?.username || 'User'} declined your connection request`, 'info');
+    });
+
+    socket.on('error', (error) => {
+      addDebugLog(`Socket error: ${error}`);
+      console.error('Socket error:', error);
+      showNotificationMessage(`Socket error: ${error}`, 'error');
+    });
+
+    return () => {
+      addDebugLog('Removing socket event listeners');
+      socket.off('connect');
+      socket.off('disconnect');
+      socket.off('online-users');
+      socket.off('user-key-available');
+      socket.off('receive-message');
+      socket.off('connection-request-received');
+      socket.off('connection-request-accepted');
+      socket.off('connection-request-denied');
+      socket.off('error');
+    };
+  }, [socket, allUsers]);
+
   function generateKeyPair() {
+    addDebugLog('Generating RSA key pair...');
     const crypt = new JSEncrypt({ default_key_size: 1024 });
     const privateKey = crypt.getPrivateKey();
     const publicKey = crypt.getPublicKey();
     setMyKeys({ privateKey, publicKey });
 
+    addDebugLog('Uploading public key to server...');
     socket.emit('upload-public-key', {
       publicKey,
-      keyType: 'RSA'
+      keyType: 'RSA',
     });
+    showNotificationMessage('Encryption keys generated! 🔐', 'success');
   }
 
   function selectUser(userId, username) {
-  setCurrentChat(userId);
-  setMessages([]);
-
-  if (!userKeys.has(userId)) {
-    socket.emit('request-public-key', userId);
+    addDebugLog(`Selecting user for chat: ${username} (ID: ${userId})`);
+    setCurrentChat(userId);
+    
+    // Load messages for this specific chat
+    const chatMessages = allMessages.get(userId) || [];
+    addDebugLog(`Loading ${chatMessages.length} messages for chat with ${username}`);
+    setMessages(chatMessages);
   }
-}
 
-  // Send message handler
+  function sendConnectionRequest(targetUserId) {
+    if (connectionRequestsSent.has(targetUserId) || connectedWith.has(targetUserId)) {
+      addDebugLog('Connection already exists or request already sent');
+      return;
+    }
+    
+    if (!myKeys.publicKey) {
+      addDebugLog('Cannot send connection request - no public key available');
+      showNotificationMessage('Please wait for keys to be generated', 'error');
+      return;
+    }
+    
+    addDebugLog(`Sending connection request to: ${targetUserId} with public key`);
+    socket.emit('connection-request', targetUserId, myKeys.publicKey);
+    setConnectionRequestsSent((prev) => new Set(prev).add(targetUserId));
+    const user = allUsers.find(u => u._id === targetUserId);
+    showNotificationMessage(`Connection request sent to ${user?.username || 'user'}! 🚀`, 'success');
+  }
+
+  function acceptConnectionRequest(userId) {
+    addDebugLog(`Accepting connection request from: ${userId}`);
+    
+    if (!myKeys.publicKey) {
+      addDebugLog('Cannot accept connection request - no public key available');
+      showNotificationMessage('Please wait for keys to be generated', 'error');
+      return;
+    }
+    
+    socket.emit('connection-request-accept', userId, myKeys.publicKey);
+    setConnectedWith((prev) => new Set(prev).add(userId));
+    setConnectionRequestsReceived((prev) => prev.filter((r) => r.userId !== userId));
+    const user = allUsers.find(u => u._id === userId);
+    showNotificationMessage(`Connection accepted! You can now chat securely with ${user?.username || 'user'}! 🎉`, 'success');
+  }
+
+  function denyConnectionRequest(userId) {
+    addDebugLog(`Denying connection request from: ${userId}`);
+    socket.emit('connection-request-deny', userId);
+    setConnectionRequestsReceived((prev) => prev.filter((r) => r.userId !== userId));
+    
+    // Remove the requester's public key since connection was denied
+    setUserKeys((prev) => {
+      const newMap = new Map(prev);
+      newMap.delete(userId);
+      return newMap;
+    });
+    
+    showNotificationMessage('Connection request declined', 'info');
+  }
+
   function sendMessage() {
     if (!currentChat) return;
+    
+    if (!isChatSecure(currentChat)) {
+      if (!connectedWith.has(currentChat)) {
+        showNotificationMessage('You must establish connection before chatting.', 'error');
+      } else {
+        showNotificationMessage('Waiting for encryption keys to be exchanged.', 'error');
+      }
+      return;
+    }
+
     const message = messageInputRef.current.value.trim();
     if (!message) return;
 
     const userKey = userKeys.get(currentChat);
     if (!userKey) {
-      alert("Recipient's public key not available");
+      showNotificationMessage("Recipient's public key not available", 'error');
       return;
     }
 
-    // AES key for encrypting message
-    const aesKey = CryptoJS.lib.WordArray.random(256 / 8).toString();
+    addDebugLog(`Sending message "${message}" to user ID: ${currentChat}`);
 
+    const aesKey = CryptoJS.lib.WordArray.random(256 / 8).toString();
     const encryptedMessage = CryptoJS.AES.encrypt(message, aesKey).toString();
 
-    // Encrypt AES key with recipient's public key
     const rsaEncrypt = new JSEncrypt();
     rsaEncrypt.setPublicKey(userKey.publicKey);
     const encryptedAESKey = rsaEncrypt.encrypt(aesKey);
@@ -158,10 +341,9 @@ useEffect(() => {
     const timestamp = new Date().toISOString();
     const nonce = CryptoJS.lib.WordArray.random(128 / 8).toString();
 
-    // Sign the message
     const rsaSign = new JSEncrypt();
     rsaSign.setPrivateKey(myKeys.privateKey);
-    const signature = rsaSign.sign(message + timestamp + nonce, CryptoJS.SHA256, "sha256");
+    const signature = rsaSign.sign(message + timestamp + nonce, CryptoJS.SHA256, 'sha256');
 
     socket.emit('send-message', {
       encryptedMessage,
@@ -169,35 +351,60 @@ useEffect(() => {
       timestamp,
       nonce,
       signature,
-      targetUserId: currentChat
+      targetUserId: currentChat,
     });
 
-    // Show sent message immediately
     const newMsg = {
       from: currentUserData.email,
       fromUsername: currentUserData.username,
       message,
       timestamp,
       verified: true,
-      sent: true
+      sent: true,
     };
+    
+    addDebugLog(`Storing sent message in chat ID: ${currentChat}`);
+    
+    // Add to current messages
     setMessages((msgs) => [...msgs, newMsg]);
+    
+    // Add to all messages for this chat
+    setAllMessages((allMsgs) => {
+      const chatMessages = allMsgs.get(currentChat) || [];
+      const updatedMessages = [...chatMessages, newMsg];
+      const newAllMessages = new Map(allMsgs);
+      newAllMessages.set(currentChat, updatedMessages);
+      addDebugLog(`Chat ${currentChat} now has ${updatedMessages.length} messages after sending`);
+      return newAllMessages;
+    });
+    
     messageInputRef.current.value = '';
+    showNotificationMessage('Message sent securely! 📨', 'success');
   }
 
-  // Decrypt incoming message and display
   function decryptAndDisplayMessage(data) {
     try {
+      addDebugLog(`Received encrypted message from: ${data.fromUsername} (ID: ${data.from})`);
+      addDebugLog(`Current chat ID: ${currentChat}`);
+      addDebugLog(`Current user email: ${currentUserData.email}`);
+      
       const rsaDecrypt = new JSEncrypt();
       rsaDecrypt.setPrivateKey(myKeys.privateKey);
       const aesKey = rsaDecrypt.decrypt(data.encryptedAESKey);
-      if (!aesKey) return;
+      if (!aesKey) {
+        addDebugLog('Failed to decrypt AES key');
+        return;
+      }
 
       const decryptedBytes = CryptoJS.AES.decrypt(data.encryptedMessage, aesKey);
       const message = decryptedBytes.toString(CryptoJS.enc.Utf8);
-      if (!message) return;
+      if (!message) {
+        addDebugLog('Failed to decrypt message content');
+        return;
+      }
 
-      // Verify signature
+      addDebugLog(`Decrypted message: "${message}"`);
+
       let verified = false;
       if (data.signature) {
         const senderKey = userKeys.get(data.from);
@@ -208,35 +415,75 @@ useEffect(() => {
         }
       }
 
-      // Timestamp replay check
       const msgTime = new Date(data.timestamp).getTime();
       if (Math.abs(Date.now() - msgTime) > 300000) {
         console.warn('Message timestamp suspicious');
         return;
       }
 
-      if (data.from === currentChat) {
-        const newMsg = {
-          from: data.from,
-          fromUsername: data.fromUsername || data.from,
-          message,
-          timestamp: data.timestamp,
-          verified,
-          sent: false
-        };
+      // Create the message object
+      const newMsg = {
+        from: data.from,
+        fromUsername: data.fromUsername || data.from,
+        message,
+        timestamp: data.timestamp,
+        verified,
+        sent: false,
+      };
+
+      // Find the sender's user ID - this might be different from data.from
+      let senderUserId = data.from;
+      
+      // Try to find the user in allUsers by matching email or other identifier
+      const senderUser = allUsers.find(u => 
+        u._id === data.from || 
+        u.email === data.from || 
+        u.username === data.fromUsername
+      );
+      
+      if (senderUser) {
+        senderUserId = senderUser._id;
+        addDebugLog(`Found sender user: ${senderUser.username} with ID: ${senderUserId}`);
+      } else {
+        addDebugLog(`Could not find sender user in allUsers list`);
+      }
+
+      addDebugLog(`Storing message in chat ID: ${senderUserId}`);
+
+      // Store message in the chat with the sender
+      setAllMessages((allMsgs) => {
+        const chatMessages = allMsgs.get(senderUserId) || [];
+        const updatedMessages = [...chatMessages, newMsg];
+        const newAllMessages = new Map(allMsgs);
+        newAllMessages.set(senderUserId, updatedMessages);
+        addDebugLog(`Chat ${senderUserId} now has ${updatedMessages.length} messages`);
+        return newAllMessages;
+      });
+
+      // If we're currently viewing the chat with the sender, update current messages
+      if (senderUserId === currentChat) {
+        addDebugLog('Adding message to current chat view');
         setMessages((msgs) => [...msgs, newMsg]);
+      } else {
+        addDebugLog(`Not adding to current view - sender ID ${senderUserId} != current chat ${currentChat}`);
+      }
+      
+      // Show notification if we're not currently viewing this chat
+      if (currentChat !== senderUserId) {
+        showNotificationMessage(`New message from ${data.fromUsername}! 📩`, 'info');
       }
     } catch (err) {
       console.error('Error decrypting message:', err);
+      addDebugLog(`Decryption error: ${err.message}`);
+      showNotificationMessage('Failed to decrypt message', 'error');
     }
   }
 
-  // Logout handler
   function logout() {
     const token = localStorage.getItem('authToken');
-    fetch('/api/logout', {
+    fetch('http://localhost:5000/api/logout', {
       method: 'POST',
-      headers: { 'Authorization': `Bearer ${token}` }
+      headers: { Authorization: `Bearer ${token}` },
     }).finally(() => {
       localStorage.removeItem('authToken');
       localStorage.removeItem('userEmail');
@@ -246,131 +493,357 @@ useEffect(() => {
   }
 
   return (
-    <div className="chat-app" style={{ height: '100vh', display: 'flex', flexDirection: 'column' }}>
-      {/* Header */}
-      <header className="header" >
-        <h1><FaShieldAlt /> SecureChat</h1>
-        <div className="header-info" >
-          <div className={`status ${connectionStatus === 'Connected' ? 'status-online' : 'status-offline'}`} >
-            <div
-              className={`status-dot ${connectionStatus === 'Connected' ? 'status-online' : 'status-offline'}`}
-              
-            />
-            <span>{connectionStatus}</span>
+    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900 to-slate-900 flex flex-col">
+      {/* Notification */}
+      {showNotification && (
+        <div className={`fixed top-4 right-4 z-50 p-4 rounded-xl shadow-2xl transform transition-all duration-500 ${
+          notificationType === 'success' ? 'bg-gradient-to-r from-emerald-500 to-teal-500' :
+          notificationType === 'error' ? 'bg-gradient-to-r from-red-500 to-pink-500' :
+          'bg-gradient-to-r from-blue-500 to-indigo-500'
+        } text-white animate-pulse`}>
+          <div className="flex items-center gap-3">
+            {notificationType === 'success' && <FaCheckCircle className="text-2xl" />}
+            {notificationType === 'error' && <FaExclamationTriangle className="text-2xl" />}
+            {notificationType === 'info' && <FaBell className="text-2xl" />}
+            <span className="font-semibold">{notificationMessage}</span>
+            <button onClick={() => setShowNotification(false)} className="ml-2 hover:bg-white/20 rounded-full p-1">
+              <FaTimes />
+            </button>
           </div>
-          <button onClick={logout} ><FaSignOutAlt /> Logout</button>
+        </div>
+      )}
+
+      {/* Header */}
+      <header className="bg-black/50 backdrop-blur-md border-b border-purple-500/30 p-4">
+        <div className="flex justify-between items-center">
+          <h1 className="text-3xl font-bold text-white flex items-center gap-3">
+            <FaShieldAlt className="text-purple-400" /> 
+            <span className="bg-gradient-to-r from-purple-400 to-pink-400 bg-clip-text text-transparent">
+              SecureChat
+            </span>
+          </h1>
+          
+          <div className="flex items-center gap-6">
+            {/* Connection Requests in Header */}
+            <div className="relative">
+              <button
+                onClick={() => setShowConnectionRequests(!showConnectionRequests)}
+                className="relative bg-gradient-to-r from-purple-600 to-pink-600 hover:from-purple-700 hover:to-pink-700 text-white px-4 py-2 rounded-xl transition-all duration-300 flex items-center gap-2 shadow-lg hover:shadow-purple-500/25"
+              >
+                <FaBell className="text-lg" />
+                <span className="font-semibold">Requests</span>
+                {connectionRequestsReceived.length > 0 && (
+                  <span className="absolute -top-2 -right-2 bg-red-500 text-white text-xs rounded-full h-6 w-6 flex items-center justify-center animate-bounce">
+                    {connectionRequestsReceived.length}
+                  </span>
+                )}
+              </button>
+
+              {/* Connection Requests Dropdown */}
+              {showConnectionRequests && (
+                <div className="absolute right-0 top-full mt-2 w-96 bg-black/90 backdrop-blur-md rounded-2xl shadow-2xl border border-purple-500/30 z-50">
+                  <div className="p-4 border-b border-purple-500/30">
+                    <h3 className="text-white font-bold text-lg flex items-center gap-2">
+                      <FaUserPlus className="text-purple-400" />
+                      Connection Requests ({connectionRequestsReceived.length})
+                    </h3>
+                  </div>
+                  
+                  {connectionRequestsReceived.length === 0 ? (
+                    <div className="p-6 text-center text-gray-400">
+                      <FaHeart className="text-4xl mx-auto mb-3 opacity-50" />
+                      <p>No pending requests</p>
+                    </div>
+                  ) : (
+                    <div className="max-h-80 overflow-y-auto">
+                      {connectionRequestsReceived.map((req) => (
+                        <div key={req.userId} className="p-4 border-b border-purple-500/20 hover:bg-purple-500/10 transition-colors">
+                          <div className="flex items-center justify-between">
+                            <div className="flex items-center gap-3">
+                              <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                                <FaUserCircle className="text-2xl text-white" />
+                              </div>
+                              <div>
+                                <h4 className="text-white font-semibold">{req.username}</h4>
+                                <p className="text-purple-300 text-sm">wants to connect with you</p>
+                              </div>
+                            </div>
+                            <div className="flex gap-2">
+                              <button
+                                onClick={() => acceptConnectionRequest(req.userId)}
+                                className="bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-600 hover:to-teal-600 text-white px-4 py-2 rounded-lg transition-all duration-300 flex items-center gap-2 shadow-lg"
+                              >
+                                <FaCheck /> Accept
+                              </button>
+                              <button
+                                onClick={() => denyConnectionRequest(req.userId)}
+                                className="bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white px-4 py-2 rounded-lg transition-all duration-300 flex items-center gap-2 shadow-lg"
+                              >
+                                <FaTimes /> Decline
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="flex items-center gap-4">
+              <div className="flex items-center gap-3 bg-black/30 rounded-xl px-4 py-2">
+                <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                  <FaUserCircle className="text-white text-lg" />
+                </div>
+                <div className="text-white">
+                  <div className="font-semibold">{currentUserData.username}</div>
+                  <div className="text-sm text-purple-300">{currentUserData.email}</div>
+                </div>
+              </div>
+              
+              <div className={`flex items-center gap-2 px-3 py-2 rounded-lg ${
+                connectionStatus === 'Connected' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/20 text-red-400'
+              }`}>
+                <div className={`w-3 h-3 rounded-full ${
+                  connectionStatus === 'Connected' ? 'bg-emerald-400 animate-pulse' : 'bg-red-400'
+                }`} />
+                <span className="font-semibold">{connectionStatus}</span>
+              </div>
+              
+              <button
+                onClick={logout}
+                className="bg-gradient-to-r from-red-500 to-pink-500 hover:from-red-600 hover:to-pink-600 text-white px-4 py-2 rounded-xl transition-all duration-300 flex items-center gap-2 shadow-lg"
+              >
+                <FaSignOutAlt /> Logout
+              </button>
+            </div>
+          </div>
         </div>
       </header>
 
       {/* Main Container */}
-      <div className="main-container" >
-
+      <div className="flex flex-1 overflow-hidden">
         {/* Sidebar */}
-        <aside className="sidebar" >
-          <div className="sidebar-header" >
-            <div className="logged-user" >
-              <div className="user-avatar" ><FaUserCircle size={36} /></div>
-              <div className="user-details" >
-                <div className="username">{currentUserData.username}</div>
-                <div className="user-email">{currentUserData.email}</div>
-              </div>
-              <div className="online-indicator" />
-            </div>
-            <h3>Online Users</h3>
-            <div className="encryption-status" >
-              <FaKey /> {myKeys.publicKey ? 'Keys ready - Secure communication enabled' : 'Generating keys...'}
+        <aside className="w-80 bg-black/30 backdrop-blur-md border-r border-purple-500/30">
+          <div className="p-6 border-b border-purple-500/30">
+            <h3 className="text-white text-xl font-bold mb-4 flex items-center gap-2">
+              <FaUser className="text-purple-400" />
+              Online Users ({Math.max(0, onlineUsers.length - 1)})
+            </h3>
+            <div className="bg-purple-500/20 rounded-xl p-3 flex items-center gap-2">
+              <FaKey className="text-purple-400" />
+              <span className="text-white text-sm">
+                {myKeys.publicKey ? 'Keys ready - Secure communication enabled' : 'Generating keys...'}
+              </span>
             </div>
           </div>
 
-          <div className="users-list" >
-            {allUsers.length === 0 && <div style={{ color: 'gray' }}>No users available</div>}
-{allUsers.map((user) => {
-  const isOnline = onlineUsers.some(u => u.userId === user._id); // user._id from DB, userId from socket
-  const hasKey = userKeys.has(user._id);
+          <div className="flex-1 overflow-y-auto p-4">
+            {allUsers.length === 0 && (
+              <div className="text-gray-400 text-center py-8">No users available</div>
+            )}
+            {/* Sort users: online users first, then offline users */}
+            {allUsers
+              .sort((a, b) => {
+                const aOnline = onlineUsers.some((u) => u.email === a.email);
+                const bOnline = onlineUsers.some((u) => u.email === b.email);
+                if (aOnline && !bOnline) return -1;
+                if (!aOnline && bOnline) return 1;
+                return 0;
+              })
+              .map((user) => {
+              const isOnline = onlineUsers.some((u) => u.email === user.email);
+              const isConnected = connectedWith.has(user._id);
+              const hasKey = userKeys.has(user._id);
+              const isSecure = isChatSecure(user._id);
+              const requestSent = connectionRequestsSent.has(user._id);
 
-  return (
-    <div
-      key={user._id}
-      className={`user-item ${currentChat === user._id ? 'active' : ''}`}
-      onClick={() => selectUser(user._id, user.username)}
-    >
-      <div className="user-info">
-        <div className="user-name">{user.username}</div>
-        <div className="user-status">{isOnline ? 'Online' : 'Offline'}</div>
-      </div>
-      <div
-        className={`key-status ${hasKey ? 'key-available' : 'key-missing'}`}
-      >
-        {hasKey ? <FaLock /> : <FaUnlockAlt />}
-        {hasKey ? 'Secure' : 'No Key'}
-      </div>
-    </div>
-  );
-})}
+              return (
+                <div
+                  key={user._id}
+                  className={`mb-3 p-4 rounded-xl transition-all duration-300 cursor-pointer hover:bg-purple-500/20 ${
+                    currentChat === user._id ? 'bg-gradient-to-r from-purple-500/30 to-pink-500/30 border border-purple-500/50' : 'bg-black/20'
+                  }`}
+                  onClick={() => selectUser(user._id, user.username)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-3 flex-1">
+                      <div className="relative">
+                        <div className="w-12 h-12 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                          <FaUserCircle className="text-2xl text-white" />
+                        </div>
+                        {isOnline && (
+                          <div className="absolute -bottom-1 -right-1 w-4 h-4 bg-emerald-400 rounded-full border-2 border-black animate-pulse" />
+                        )}
+                      </div>
+                      <div className="flex-1">
+                        <div className="text-white font-semibold">{user.username}</div>
+                        <div className={`text-sm ${isOnline ? 'text-emerald-400' : 'text-gray-400'}`}>
+                          {isOnline ? 'Online' : 'Offline'}
+                        </div>
+                      </div>
+                    </div>
 
+                    <div className="flex items-center gap-3">
+                      <div className={`flex items-center gap-1 px-2 py-1 rounded-lg text-xs ${
+                        isSecure ? 'bg-emerald-500/20 text-emerald-400' : 
+                        isConnected ? 'bg-yellow-500/20 text-yellow-400' : 
+                        'bg-red-500/20 text-red-400'
+                      }`}>
+                        {isSecure ? <FaLock /> : isConnected ? <FaKey /> : <FaUnlockAlt />}
+                        {isSecure ? 'Secure' : isConnected ? 'Keys...' : 'No Key'}
+                      </div>
+
+                      {isConnected ? (
+                        <div className="text-emerald-400" title="Connected">
+                          <FaLockIcon className="text-lg" />
+                        </div>
+                      ) : requestSent ? (
+                        <div className="bg-yellow-500/20 text-yellow-400 px-3 py-1 rounded-lg text-xs font-semibold">
+                          Pending...
+                        </div>
+                      ) : (
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            sendConnectionRequest(user._id);
+                          }}
+                          className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white p-2 rounded-lg transition-all duration-300 shadow-lg hover:shadow-purple-500/25"
+                          title="Request Connection"
+                        >
+                          <FaUserPlus />
+                        </button>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </aside>
 
         {/* Chat Container */}
-        <section className="chat-container" >
+        <section className="flex-1 flex flex-col">
           {!currentChat ? (
-            <div
-              id="chatArea"
-              className="no-chat"
-              
-            >
-              <FaComments size={48} style={{ marginBottom: 20 }} />
-              <div>Select a user to start chatting</div>
+            <div className="flex-1 flex items-center justify-center bg-black/20">
+              <div className="text-center">
+                <FaComments className="text-6xl text-purple-400 mb-6 mx-auto opacity-50" />
+                <div className="text-white text-xl mb-2">Welcome to SecureChat</div>
+                <div className="text-purple-300">Select a user to start chatting securely</div>
+              </div>
             </div>
           ) : (
             <>
-              <div className="chat-header" >
-                <h3><FaUser /> {onlineUsers.find(u => u.userId === currentChat)?.username || currentChat}</h3>
-                <div
-                  className={`chat-encryption-status ${userKeys.has(currentChat) ? 'encrypted' : 'waiting'}`}
-                  style={{ color: userKeys.has(currentChat) ? 'limegreen' : 'orange', fontWeight: 'bold' }}
-                >
-                  <FaShieldAlt /> {userKeys.has(currentChat) ? 'End-to-end encrypted' : 'Waiting for encryption keys...'}
+              <div className="bg-black/30 backdrop-blur-md border-b border-purple-500/30 p-4">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <div className="w-10 h-10 bg-gradient-to-br from-purple-500 to-pink-500 rounded-full flex items-center justify-center">
+                      <FaUserCircle className="text-white text-lg" />
+                    </div>
+                    <div>
+                      <h3 className="text-white text-lg font-semibold">
+                        {onlineUsers.find((u) => u.userId === currentChat)?.username || allUsers.find(u => u._id === currentChat)?.username || 'Unknown User'}
+                      </h3>
+                      <div className={`text-sm flex items-center gap-2 ${
+                        isChatSecure(currentChat) ? 'text-emerald-400' : 
+                        connectedWith.has(currentChat) ? 'text-yellow-400' : 
+                        'text-red-400'
+                      }`}>
+                        <FaShieldAlt />
+                        {isChatSecure(currentChat)
+                          ? 'End-to-end encrypted'
+                          : connectedWith.has(currentChat)
+                          ? 'Connected - Exchanging keys...'
+                          : 'Connection not established'}
+                      </div>
+                    </div>
+                  </div>
                 </div>
               </div>
 
-              <div className="messages" id="messages" >
+              <div className="flex-1 overflow-y-auto p-6 bg-gradient-to-b from-transparent to-black/20">
+                {messages.length === 0 && (
+                  <div className="text-center text-gray-400 py-8">
+                    {!connectedWith.has(currentChat) ? (
+                      <div>
+                        <FaUserPlus className="text-4xl mx-auto mb-3 opacity-50" />
+                        <p>Send a connection request to start chatting</p>
+                      </div>
+                    ) : !isChatSecure(currentChat) ? (
+                      <div>
+                        <FaKey className="text-4xl mx-auto mb-3 opacity-50" />
+                        <p>Exchanging encryption keys...</p>
+                      </div>
+                    ) : (
+                      <div>
+                        <FaComments className="text-4xl mx-auto mb-3 opacity-50" />
+                        <p>Start your secure conversation</p>
+                      </div>
+                    )}
+                  </div>
+                )}
                 {messages.map((msg, idx) => {
                   const time = new Date(msg.timestamp).toLocaleTimeString();
                   return (
                     <div
                       key={idx}
-                      className={`message ${msg.sent ? 'message-sent' : 'message-received'}`}
-                      
+                      className={`mb-4 flex ${msg.sent ? 'justify-end' : 'justify-start'}`}
                     >
-                      <div className="message-bubble" style={{ padding: '8px' }}>{msg.message}</div>
-                      <div className="message-time" style={{ fontSize: '0.75rem', opacity: 0.7 }}>{time}</div>
-                      <div className="message-status" style={{ fontSize: '0.75rem', opacity: 0.7, display: 'flex', alignItems: 'center', gap: 5 }}>
-                        {msg.verified ? <FaCheckCircle color="limegreen" /> : <FaExclamationTriangle color="tomato" />}
-                        {msg.verified ? 'Verified' : 'Unverified'}
+                      <div className={`max-w-xs lg:max-w-md ${msg.sent ? 'order-2' : 'order-1'}`}>
+                        <div className={`p-4 rounded-2xl shadow-lg ${
+                          msg.sent 
+                            ? 'bg-gradient-to-r from-purple-500 to-pink-500 text-white ml-4' 
+                            : 'bg-black/50 backdrop-blur-md text-white mr-4 border border-purple-500/30'
+                        }`}>
+                          <div className="font-medium">{msg.message}</div>
+                          <div className="flex items-center justify-between mt-2 pt-2 border-t border-white/20">
+                            <span className="text-xs opacity-70">{time}</span>
+                            <div className="flex items-center gap-1 text-xs">
+                              {msg.verified ? (
+                                <><FaCheckCircle className="text-emerald-400" /> Verified</>
+                              ) : (
+                                <><FaExclamationTriangle className="text-red-400" /> Unverified</>
+                              )}
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   );
                 })}
               </div>
 
-              <div className="message-input" >
-                <input
-                  type="text"
-                  id="messageInput"
-                  placeholder="Type your message..."
-                  disabled={!userKeys.has(currentChat)}
-                  ref={messageInputRef}
-                  onKeyPress={(e) => { if (e.key === 'Enter') sendMessage(); }}
-                />
-                <button
-                  className="btn-send"
-                  onClick={sendMessage}
-                  disabled={!userKeys.has(currentChat)}
-                 
-                >
-                  <FaPaperPlane />
-                </button>
+              <div className="bg-black/30 backdrop-blur-md border-t border-purple-500/30 p-4">
+                {!connectedWith.has(currentChat) ? (
+                  <div className="text-center text-gray-400 py-4">
+                    <FaLock className="text-2xl mx-auto mb-2" />
+                    <p>You must establish a connection before chatting</p>
+                  </div>
+                ) : !isChatSecure(currentChat) ? (
+                  <div className="text-center text-yellow-400 py-4">
+                    <FaKey className="text-2xl mx-auto mb-2" />
+                    <p>Exchanging encryption keys... Please wait</p>
+                  </div>
+                ) : (
+                  <div className="flex gap-3">
+                    <input
+                      type="text"
+                      ref={messageInputRef}
+                      placeholder="Type your secure message..."
+                      className="flex-1 bg-black/50 text-white placeholder-gray-400 border border-purple-500/30 rounded-xl px-4 py-3 focus:outline-none focus:border-purple-400 focus:ring-2 focus:ring-purple-400/20"
+                      onKeyPress={(e) => {
+                        if (e.key === 'Enter') sendMessage();
+                      }}
+                    />
+                    <button
+                      onClick={sendMessage}
+                      className="bg-gradient-to-r from-purple-500 to-pink-500 hover:from-purple-600 hover:to-pink-600 text-white px-6 py-3 rounded-xl transition-all duration-300 flex items-center gap-2 shadow-lg hover:shadow-purple-500/25"
+                    >
+                      <FaPaperPlane />
+                    </button>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -379,5 +852,3 @@ useEffect(() => {
     </div>
   );
 }
-
-
