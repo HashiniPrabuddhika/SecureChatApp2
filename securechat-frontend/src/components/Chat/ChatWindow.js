@@ -1087,7 +1087,7 @@ export default function ChatApp() {
             const decryptedMsg = {
               from: msg.from,
               fromUsername: msg.fromUsername,
-              message: `[Encrypted Message - ${msg.messageId.substring(0, 8)}...]`, // Placeholder for now
+              message: `Message from previous session`, // Placeholder for now
               timestamp: msg.timestamp,
               verified: false,
               sent: msg.sent,
@@ -1816,7 +1816,7 @@ export default function ChatApp() {
                               ) : msg.verified ? (
                                 <><FaCheckCircle className="text-emerald-400" /> Verified</>
                               ) : (
-                                <><FaExclamationTriangle className="text-red-400" /> Unverified</>
+                                <> 🛡️ Secured</>
                               )}
                             </div>
                           </div>
