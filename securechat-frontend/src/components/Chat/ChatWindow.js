@@ -16,6 +16,33 @@ export default function ChatApp() {
   const [currentUserData, setCurrentUserData] = useState({ email: '', username: '' });
   const [messages, setMessages] = useState([]); // messages for current chat
   const messageInputRef = useRef(null);
+  const [allUsers, setAllUsers] = useState([]);
+
+useEffect(() => {
+  const storedToken = localStorage.getItem('authToken');
+  const currentEmail = localStorage.getItem('userEmail');
+
+  if (!storedToken) return;
+
+  fetch('http://localhost:5000/api/users', {
+    headers: {
+      Authorization: `Bearer ${storedToken}`,
+    },
+  })
+    .then((res) => {
+      if (!res.ok) throw new Error('Failed to fetch users');
+      return res.json();
+    })
+    .then((data) => {
+      // Remove current user from the list
+      const filtered = data.filter((user) => user.email !== currentEmail);
+      setAllUsers(filtered);
+    })
+    .catch((err) => {
+      console.error('Fetch error:', err);
+    });
+}, []);
+
 
   // Load token & user info from localStorage
   useEffect(() => {
@@ -97,16 +124,14 @@ export default function ChatApp() {
     });
   }
 
-  // Select user to chat with
   function selectUser(userId, username) {
-    setCurrentChat(userId);
-    setMessages([]);
+  setCurrentChat(userId);
+  setMessages([]);
 
-    // Request key if missing
-    if (!userKeys.has(userId)) {
-      socket.emit('request-public-key', userId);
-    }
+  if (!userKeys.has(userId)) {
+    socket.emit('request-public-key', userId);
   }
+}
 
   // Send message handler
   function sendMessage() {
@@ -258,30 +283,31 @@ export default function ChatApp() {
           </div>
 
           <div className="users-list" >
-            {onlineUsers.length === 0 && <div style={{ color: 'gray' }}>No users online</div>}
-            {onlineUsers.map((user) => {
-              const hasKey = user.hasPublicKey || userKeys.has(user.userId);
-              return (
-                <div
-                  key={user.userId}
-                  className={`user-item ${currentChat === user.userId ? 'active' : ''}`}
-                  
-                  onClick={() => selectUser(user.userId, user.username)}
-                >
-                  <div className="user-info" >
-                    <div className="user-name">{user.username || user.userId.split('@')[0]}</div>
-                    <div className="user-status" >Online</div>
-                  </div>
-                  <div
-                    className={`key-status ${hasKey ? 'key-available' : 'key-missing'}`}
-                    
-                  >
-                    {hasKey ? <FaLock /> : <FaUnlockAlt />}
-                    {hasKey ? 'Link with the connection' : 'No Key'}
-                  </div>
-                </div>
-              );
-            })}
+            {allUsers.length === 0 && <div style={{ color: 'gray' }}>No users available</div>}
+{allUsers.map((user) => {
+  const isOnline = onlineUsers.some(u => u.userId === user._id); // user._id from DB, userId from socket
+  const hasKey = userKeys.has(user._id);
+
+  return (
+    <div
+      key={user._id}
+      className={`user-item ${currentChat === user._id ? 'active' : ''}`}
+      onClick={() => selectUser(user._id, user.username)}
+    >
+      <div className="user-info">
+        <div className="user-name">{user.username}</div>
+        <div className="user-status">{isOnline ? 'Online' : 'Offline'}</div>
+      </div>
+      <div
+        className={`key-status ${hasKey ? 'key-available' : 'key-missing'}`}
+      >
+        {hasKey ? <FaLock /> : <FaUnlockAlt />}
+        {hasKey ? 'Secure' : 'No Key'}
+      </div>
+    </div>
+  );
+})}
+
           </div>
         </aside>
 

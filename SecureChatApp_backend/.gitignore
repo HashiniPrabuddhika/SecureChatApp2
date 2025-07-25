@@ -8,7 +8,7 @@ yarn-error.log*
 .env
 
 # Logs
-logs/
+# logs/
 *.log
 
 # MongoDB data (if local DB is stored here)
