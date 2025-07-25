@@ -10,6 +10,7 @@ const socketHandler = require('./socket/socketHandler');
 const connectDB = require('./config/mongodb');
 const { Server } = require('socket.io');
 const authenticateToken = require('./middleware/auth');
+const userRoutes = require('./routes/user');
 
 const app = express();
 const server = http.createServer(app);
@@ -34,6 +35,8 @@ app.get('/api/me', authenticateToken, (req, res) => {
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/messages', messageRoutes);
+app.use('/api/users', userRoutes);
+
 
 // Connect to MongoDB
 connectDB();
