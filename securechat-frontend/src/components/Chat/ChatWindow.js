@@ -1087,7 +1087,7 @@ export default function ChatApp() {
             const decryptedMsg = {
               from: msg.from,
               fromUsername: msg.fromUsername,
-              message: `Message from previous session`, // Placeholder for now
+              message: `Previous session message`, // Placeholder for now
               timestamp: msg.timestamp,
               verified: false,
               sent: msg.sent,
